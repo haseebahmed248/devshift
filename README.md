@@ -129,7 +129,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and pull request c
 
 ## Contributing
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and report security problems privately as described in [SECURITY.md](SECURITY.md).
+Contributions are welcome, from bug reports to support for new workloads.
+
+- New here? Start with an issue labeled [good first issue](https://github.com/haseebahmed248/devshift/labels/good%20first%20issue) or [help wanted](https://github.com/haseebahmed248/devshift/labels/help%20wanted).
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and the pull request checklist.
+- Ask questions and share ideas in [Discussions](https://github.com/haseebahmed248/devshift/discussions).
+- Report security problems privately, as described in [SECURITY.md](SECURITY.md).
+
+Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

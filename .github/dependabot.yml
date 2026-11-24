@@ -12,6 +12,10 @@ updates:
     directory: /native
     schedule:
       interval: monthly
+    ignore:
+      # Stay on the .NET 10 LTS package line until the helper targets a newer framework.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

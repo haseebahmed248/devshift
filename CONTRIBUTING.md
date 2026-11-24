@@ -2,7 +2,16 @@
 
 Thanks for helping. DevShift stops and starts real workloads on people's PCs, so changes are held to a high safety bar. This guide covers setup, the project layout, and what a pull request needs.
 
-For anything bigger than a small fix, open an issue first so we can agree on the approach. To report a security problem, don't open a public issue; follow [SECURITY.md](SECURITY.md) instead.
+For anything bigger than a small fix, open an issue first so we can agree on the approach. To report a security problem, don't open a public issue; follow [SECURITY.md](SECURITY.md) instead. Questions and ideas are welcome in [Discussions](https://github.com/haseebahmed248/devshift/discussions).
+
+Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Your first contribution
+
+1. Pick an issue labeled [good first issue](https://github.com/haseebahmed248/devshift/labels/good%20first%20issue) or [help wanted](https://github.com/haseebahmed248/devshift/labels/help%20wanted), and comment that you'd like to work on it.
+2. Fork the repository, clone your fork, and create a branch from `main`.
+3. Make your change and run the tests that match it. See [Tests](#tests).
+4. Push the branch to your fork and open a pull request against `main`.
 
 ## Set up
 
@@ -57,4 +66,7 @@ The desktop tests use a disposable profile and loopback Node servers, and they d
 
 - Keep each pull request focused on one change.
 - Explain what changed, why, and how you verified it. The pull request template has a checklist.
+- Pull requests are squash-merged, so the title becomes the commit message on `main`. Write it as a short command, such as "Add WSL shutdown to Gaming Mode".
+- For changes that users will notice, add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md).
+- The maintainer merges a pull request once the **Test and build** check passes and review conversations are resolved.
 - CI type-checks, runs the unit tests, and builds the app on Windows. The Windows integration tests need a desktop session, so run them locally.
