@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { Dashboard, Mode, OperationItem, Phase, ReviewTarget, Settings, SwitchPreview, SwitchState } from '../shared/contracts.js'
-import { sameFile, stopOrder } from './discovery.js'
-import {
-  errorMessage, ongoing, pending, sameIdentity, serviceKey, timestamp, UserError,
-} from './model.js'
-import type { ChangeResult, Cycle, Device, Host, JournalStep, NodeWorkload, Outcome } from './model.js'
+import { decide, planGaming, verify as verifyStep } from './actions.js'
+import { sameFile } from './discovery.js'
+import { errorMessage, ongoing, pending, serviceKey, timestamp, UserError } from './model.js'
+import type { Cycle, Device, Host, JournalStep, NodeWorkload } from './model.js'
 import type { Store } from './store.js'
 
 interface Review {
@@ -14,11 +13,14 @@ interface Review {
   direction: Mode
   cycle: Cycle
   steps: JournalStep[]
+  /** Plaintext until sealed at execution. Never journaled. */
+  secrets: Map<string, string>
 }
 
 const phaseName = (direction: Mode) => direction === 'gaming' ? 'Gaming Mode' : 'Development Mode'
 const preparation = (direction: Mode): Phase => direction === 'gaming' ? 'PREPARING_GAMING' : 'PREPARING_DEVELOPMENT'
 const switching = (direction: Mode): Phase => direction === 'gaming' ? 'SWITCHING_TO_GAMING' : 'RESTORING_DEVELOPMENT'
+const keyOf = (step: JournalStep) => step.key ?? step.id
 const canRetry = (step: JournalStep, direction: Mode) =>
   direction === 'gaming' ? ['pending', 'running', 'failed'].includes(step.gaming.status)
     : step.gaming.effect !== 'none' && !['succeeded', 'skipped'].includes(step.development.status)
@@ -90,7 +92,8 @@ export class Engine {
     const device = !this.device || (!this.busy && (refresh || age >= this.store.settings.scanInterval)) ? await this.read() : this.device
     return {
       state: this.state(), settings: this.store.settings, workloads: device.workloads,
-      installed: device.scan.installed, power: device.scan.power, build: device.scan.build, scannedAt: device.scannedAt, history: this.store.recent(),
+      installed: device.scan.installed, power: device.scan.power, powerMode: device.scan.powerMode ?? null,
+      build: device.scan.build, scannedAt: device.scannedAt, history: this.store.recent(),
     }
   }
 
@@ -111,60 +114,22 @@ export class Engine {
     try { return await work() } finally { this.busy = false; this.publish(this.state()) }
   }
 
-  private prepareGaming(device: Device): Cycle {
+  private prepareGaming(device: Device) {
+    const plan = planGaming(device, this.store.settings, this.store.approvals)
     const cycle: Cycle = {
       schema: 1, id: randomUUID(), originalMode: 'development', originalPower: device.scan.power.active,
       createdAt: timestamp(), updatedAt: timestamp(), direction: 'gaming', phase: 'PREPARING_GAMING',
-      notices: [], blocked: [], steps: [], history: [], summary: 'Saving a recovery snapshot.',
+      notices: plan.notices, blocked: plan.blocked, history: [], summary: 'Saving a recovery snapshot.',
+      steps: plan.steps.map(step => ({
+        id: step.id, key: step.key, label: step.label, forward: step.forward, backward: step.backward, captured: step.captured,
+        gaming: pending(), development: pending(),
+      })),
     }
-    const add = (id: string, label: string, captured: JournalStep['captured'], forward: string, backward: string) =>
-      cycle.steps.push({ id, label, captured, forward, backward, gaming: pending(), development: pending() })
-
-    for (const node of device.nodes) {
-      const { configuration, process, ready, sessionId } = node
-      if (node.state === 'stopped') continue
-      if (!ready || !process || !sessionId || !process.started || !process.path) {
-        cycle.blocked.push(configuration.label + ' stays open. ' + node.detail)
-        continue
-      }
-      add(configuration.id, configuration.label, {
-        kind: 'node', configuration, sessionId, identity: { pid: process.pid, started: process.started, path: process.path },
-      }, 'Request the project’s graceful shutdown.', 'Relaunch the project and wait for readiness.')
+    return {
+      cycle,
+      secrets: new Map(plan.steps.flatMap(step => step.secret ? [[step.id, step.secret] as const] : [])),
+      estimates: new Map(plan.steps.map(step => [step.id, step.memoryBytes] as const)),
     }
-
-    const approvals = this.store.approvals
-    const services = device.scan.services.filter(service => approvals[serviceKey(service.name)] === service.fingerprint)
-    const candidates = services.filter(service => {
-      if (service.state === 'stopped') return false
-      if (service.state === 'running' && service.supported && service.canControl && service.acceptStop && service.pid > 0) return true
-      cycle.blocked.push(service.label + ' stays active. ' + (service.limitation ?? 'Windows cannot confirm a graceful stop.'))
-      return false
-    })
-    const { ordered, blocked } = stopOrder(candidates)
-    for (const service of blocked) cycle.blocked.push(service.label + ' stays active because it has an active dependent service.')
-    for (const service of ordered) add(serviceKey(service.name), service.label, {
-      kind: 'service', name: service.name, fingerprint: service.fingerprint, pid: service.pid,
-      requires: service.requires.map(link => link.name), dependents: service.dependents.map(link => link.name),
-    }, 'Stop this approved Windows service.', 'Start this Windows service and check its reported state.')
-
-    const target = this.store.settings.gamingPlan
-    const next = device.scan.power.plans.find(plan => plan.id === target)
-    if (target && !next) cycle.blocked.push('The preferred gaming power plan is unavailable.')
-    if (next && next.id !== cycle.originalPower) {
-      const original = device.scan.power.plans.find(plan => plan.id === cycle.originalPower)?.name ?? 'original plan'
-      add('power', 'Power plan', { kind: 'power', before: cycle.originalPower, after: next.id },
-        original + ' to ' + next.name, next.name + ' to ' + original)
-    }
-
-    const observed = [...new Set(device.workloads.filter(row => row.state === 'running' && !row.approved).map(row => row.label))]
-    if (observed.length) cycle.notices.push('Left running: ' + observed.join(', ') + '.')
-    if (device.workloads.some(row => row.category === 'Editor' && row.state === 'running'))
-      cycle.notices.push('DevShift cannot verify unsaved editor work. Open editors stay running.')
-    if (cycle.steps.some(step => step.captured.kind === 'node'))
-      cycle.notices.push('Restored projects start as fresh processes. In-memory state is unavailable.')
-    if (cycle.steps.some(step => step.captured.kind === 'service'))
-      cycle.notices.push('Confirm that other applications and clients can tolerate the selected service interruption.')
-    return cycle
   }
 
   async review(target: ReviewTarget): Promise<SwitchPreview> {
@@ -175,15 +140,17 @@ export class Engine {
         if (!active || !['RECOVERY_REQUIRED', 'FAILED', 'PARTIAL_SUCCESS'].includes(active.phase))
           throw new UserError('There is no pending recovery to close.')
         const token = randomUUID()
-        this.reviewPlan = { token, target, expires: Date.now() + 120_000, cycle: active, steps: [], direction: 'development' }
+        this.reviewPlan = { token, target, expires: Date.now() + 120_000, cycle: active, steps: [], direction: 'development', secrets: new Map() }
         return { token, direction: 'development', recovery: true, keep: true, items: [],
           notices: ['This closes recovery and keeps all current Windows settings and workloads. You can review the saved history afterward.'] }
       }
       const device = await this.read()
       let cycle: Cycle
       let direction: Mode
+      let secrets = new Map<string, string>()
+      let estimates: Map<string, number | null> | null = null
       if (!active && target === 'gaming') {
-        cycle = this.prepareGaming(device)
+        ({ cycle, secrets, estimates } = this.prepareGaming(device))
         direction = 'gaming'
       } else if (active && target === 'development') {
         cycle = active
@@ -196,7 +163,8 @@ export class Engine {
       const steps = cycle.steps.filter(step => canRetry(step, direction))
       if (direction === 'development') steps.reverse()
       const token = randomUUID()
-      this.reviewPlan = { token, target, expires: Date.now() + 120_000, cycle, steps, direction }
+      this.reviewPlan = { token, target, expires: Date.now() + 120_000, cycle, steps, direction, secrets }
+      const skipped = estimates ? new Set(this.store.skips) : new Set<string>()
       const notices = direction === 'gaming' ? [...cycle.blocked, ...cycle.notices] : [
         'Projects and services from the saved snapshot restart only if their current configuration still matches.',
         'A different power plan selected since the switch stays in place.',
@@ -205,19 +173,35 @@ export class Engine {
         notices.unshift('A previous action may have changed Windows before verification. DevShift will check current state before applying recovery.')
       return {
         token, direction, recovery: active?.phase === 'RECOVERY_REQUIRED' || target === 'resume', keep: false,
-        items: steps.map(step => ({ ...item(step, direction), status: 'pending', message: '' })), notices,
+        items: steps.map(step => ({
+          ...item(step, direction), status: 'pending', message: '', selected: !skipped.has(keyOf(step)),
+          ...(estimates ? { memoryBytes: estimates.get(step.id) ?? null } : {}),
+        })),
+        notices,
       }
     })
   }
 
-  async execute(token: string): Promise<SwitchState> {
+  private rememberChoices(steps: JournalStep[], skipped: Set<string>) {
+    const skips = new Set(this.store.skips)
+    for (const step of steps) {
+      if (skipped.has(step.id)) skips.add(keyOf(step))
+      else skips.delete(keyOf(step))
+    }
+    this.store.skips = [...skips].slice(-200)
+  }
+
+  async execute(token: string, skip: readonly string[] = []): Promise<SwitchState> {
     await this.exclusive(async () => {
       const review = this.reviewPlan
       if (!review || review.token !== token || Date.now() > review.expires)
         throw new UserError('The switch preview expired. Review the current workload state again.')
+      const reviewed = new Set(review.steps.map(step => step.id))
+      if (skip.some(id => !reviewed.has(id))) throw new UserError('The switch preview changed. Review it again.')
 
       this.reviewPlan = null
-      const { cycle, direction, steps } = review
+      const { cycle, direction } = review
+      const skipped = new Set(skip)
       if (review.target === 'keep' && this.cycle?.id === cycle.id) {
         cycle.direction = 'development'
         cycle.phase = 'PARTIAL_SUCCESS'
@@ -230,20 +214,31 @@ export class Engine {
         return
       }
       const device = await this.read()
-      if (review.target === 'gaming' && !this.cycle) {
-        const fresh = this.prepareGaming(device)
+      const firstAttempt = !this.cycle
+      if (review.target === 'gaming' && firstAttempt) {
+        const fresh = this.prepareGaming(device).cycle
         if (JSON.stringify([fresh.steps, fresh.blocked, fresh.originalPower]) !== JSON.stringify([cycle.steps, cycle.blocked, cycle.originalPower]))
           throw new UserError('Approved workloads or power settings changed after review. Open an updated preview.')
+        this.rememberChoices(cycle.steps, skipped)
+        cycle.steps = cycle.steps.filter(step => !skipped.has(step.id))
+        for (const step of cycle.steps) {
+          const secret = review.secrets.get(step.id)
+          if (secret && (step.captured.kind === 'app' || step.captured.kind === 'devserver')) step.captured.sealed = await this.host.seal(secret)
+        }
       } else if (!this.cycle || this.cycle.id !== cycle.id) {
         throw new UserError('The saved transaction changed. Review it again.')
       }
+      const steps = review.target === 'gaming' && firstAttempt ? cycle.steps : review.steps.filter(step => !skipped.has(step.id))
 
       cycle.direction = direction
       cycle.phase = preparation(direction)
       cycle.summary = direction === 'gaming' ? 'Saving the recovery snapshot.' : 'Checking the saved recovery snapshot.'
-      const firstAttempt = !this.cycle
       this.log(cycle, direction === 'gaming' ? 'Gaming switch requested' : 'Restore requested', cycle.summary, 'running')
       if (firstAttempt) for (const reason of cycle.blocked) this.log(cycle, 'Skipped approved change', reason, 'skipped')
+      if (!firstAttempt) for (const step of review.steps.filter(entry => skipped.has(entry.id))) {
+        step[direction] = { ...step[direction], status: 'skipped', message: 'Skipped at your request.', time: timestamp() }
+        this.log(cycle, step.label, 'Skipped at your request.', 'skipped')
+      }
       this.save(cycle)
       cycle.phase = switching(direction)
       cycle.summary = direction === 'gaming' ? 'Applying approved changes.' : 'Restoring captured workloads.'
@@ -259,9 +254,9 @@ export class Engine {
 
       const applicable = cycle.steps.filter(step => direction === 'gaming' || step.gaming.effect !== 'none')
       const failed = verificationFailed || applicable.some(step => step[direction].status === 'failed')
-      const skipped = applicable.some(step => step[direction].status === 'skipped')
+      const skippedSteps = applicable.some(step => step[direction].status === 'skipped')
       const completed = applicable.filter(step => step[direction].status === 'succeeded').length
-      const partial = skipped || (direction === 'gaming' && cycle.blocked.length > 0) || failed
+      const partial = skippedSteps || (direction === 'gaming' && cycle.blocked.length > 0) || failed
       cycle.phase = failed && !completed ? 'FAILED' : partial ? 'PARTIAL_SUCCESS' : direction === 'gaming' ? 'GAMING' : 'DEVELOPMENT'
       cycle.summary = failed ? (completed ? 'Some actions completed. Review the failed steps and recovery options.'
         : 'DevShift could not complete the requested changes. Review the saved recovery options.')
@@ -282,74 +277,24 @@ export class Engine {
       this.log(cycle, step.label, message, status)
       this.save(cycle)
     }
-    const commit = async (action: () => Promise<ChangeResult>, success: string) => {
-      effect = 'possible'
-      step[direction] = { status: 'running', message: 'Waiting for Windows verification.', effect, time: timestamp() }
-      this.save(cycle)
-      const result = await action()
-      effect = result.changed ? 'verified' : prior.effect
-      report('succeeded', result.changed ? success : 'The requested state was already present.')
-    }
 
     try {
       const device = await this.read()
-      const capture = step.captured
-      const gaming = direction === 'gaming'
-      if (capture.kind === 'power') {
-        const before = gaming ? capture.before : capture.after
-        const after = gaming ? capture.after : capture.before
-        if (device.scan.power.active === after) {
-          if (prior.effect === 'possible') effect = 'verified'
-          return report('succeeded', 'The requested power plan is already active.')
-        }
-        if (device.scan.power.active !== before) return report('skipped', 'Preserved the power plan selected in Windows.')
-        return await commit(() => this.host.changePower(before, after), 'Verified the active power plan.')
+      const decision = await decide(step.captured, device, direction, this.host)
+      if (decision.type === 'present') {
+        if (prior.effect === 'possible') effect = 'verified'
+        return report('succeeded', decision.message)
       }
+      if (decision.type === 'skip') return report('skipped', decision.message)
 
-      if (capture.kind === 'service') {
-        const service = device.scan.services.find(candidate => candidate.name.toLowerCase() === capture.name.toLowerCase())
-        if (!service || service.fingerprint !== capture.fingerprint)
-          return report('skipped', 'Preserved service changes made since the snapshot.')
-        if (service.state === (gaming ? 'stopped' : 'running')) {
-          if (prior.effect === 'possible') effect = 'verified'
-          return report('succeeded', 'Windows already reports the requested service state.')
-        }
-        if (gaming) {
-          if (service.state !== 'running' || service.pid !== capture.pid)
-            return report('skipped', 'The original service instance changed. The new state was preserved.')
-          const hasProject = device.nodes.some(node => node.state !== 'stopped'
-            && node.configuration.dependencies.includes(service.name.toLowerCase()))
-          if (hasProject) return report('skipped', 'A running approved project still needs this service.')
-        }
-        return await commit(
-          () => this.host.changeService(service.name, service.fingerprint, gaming ? 'stop' : 'start', gaming ? capture.pid : 0),
-          gaming ? 'Windows confirmed the service stopped.' : 'Windows confirmed the service is running.',
-        )
-      }
-
-      const node = device.nodes.find(candidate => candidate.configuration.id === capture.configuration.id)
-      if (!node) return report('skipped', 'The approved project configuration is unavailable.')
-      if (gaming) {
-        if (node.state === 'stopped') {
-          if (prior.effect === 'possible') effect = 'verified'
-          return report('succeeded', 'The captured process is no longer running.')
-        }
-        if (node.state === 'unknown') throw new UserError('Windows could not verify the captured process.')
-        if (!node.process || !sameIdentity(capture.identity, node.process) || node.sessionId !== capture.sessionId)
-          return report('skipped', 'A different process now matches the project. It was left running.')
-        if (!node.ready) throw new UserError('The process is running without a verified shutdown handler.')
-        const process = node.process
-        return await commit(() => this.host.stopNode(capture.configuration, capture.sessionId, process),
-          'The project confirmed graceful shutdown and its process exited.')
-      }
-      if (node.state === 'running' && node.ready) return report('succeeded', 'The project is running and confirmed readiness.')
-      if (node.state === 'running' && !node.ready && !node.sessionId)
-        return report('skipped', 'A matching project is already running. DevShift left it in place.')
-      const current = node.configuration
-      if (current.entryHash !== capture.configuration.entryHash || current.executableHash !== capture.configuration.executableHash
-        || !sameFile(current.entry, capture.configuration.entry) || !sameFile(current.executable, capture.configuration.executable))
-        return report('skipped', 'Preserved changes to the approved project configuration.')
-      return await commit(() => this.host.startNode(capture.configuration, device.scan), 'Relaunched the project and confirmed readiness.')
+      // Record the intent before touching Windows, so an interruption is recoverable.
+      effect = 'possible'
+      step[direction] = { status: 'running', message: 'Waiting for Windows verification.', effect, time: timestamp() }
+      this.save(cycle)
+      const result = await decision.run()
+      if (result.skipped) return report('skipped', result.message ?? 'Windows left it unchanged.')
+      effect = result.changed ? 'verified' : prior.effect
+      report('succeeded', result.changed ? decision.success : 'The requested state was already present.')
     } catch (error) {
       if (error instanceof UserError && error.unchanged) effect = prior.effect
       if (step[direction].status === 'running' || step[direction].status === prior.status)
@@ -359,15 +304,8 @@ export class Engine {
   }
 
   private verify(cycle: Cycle, direction: Mode, device: Device) {
-    const gaming = direction === 'gaming'
     for (const step of cycle.steps.filter(entry => entry[direction].status === 'succeeded')) {
-      const capture = step.captured
-      const matches = capture.kind === 'power' ? device.scan.power.active === (gaming ? capture.after : capture.before)
-        : capture.kind === 'service' ? device.scan.services.some(service => service.name.toLowerCase() === capture.name.toLowerCase()
-          && service.fingerprint === capture.fingerprint && service.state === (gaming ? 'stopped' : 'running'))
-          : device.nodes.some(node => node.configuration.id === capture.configuration.id
-            && (gaming ? node.state === 'stopped' : node.state === 'running' && node.ready))
-      if (matches) continue
+      if (verifyStep(step.captured, device, direction)) continue
       const message = 'The final check found a different state. Review Windows before retrying.'
       step[direction] = { ...step[direction], status: 'failed', message, time: timestamp() }
       this.log(cycle, step.label, message, 'failed')

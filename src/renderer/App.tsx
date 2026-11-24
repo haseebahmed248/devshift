@@ -8,7 +8,7 @@ import { WorkloadTable } from './WorkloadTable.js'
 import { useStartupSplash } from './startup.js'
 import { Preferences, Register } from './forms.js'
 import { ModeScene, Performance, RecentActions, SwitchControls, WorkloadInspector, WorkloadStats } from './panels.js'
-import { ActionList, clockTime, Dialog, Empty, ErrorBanner, HistoryList, Icon } from './ui.js'
+import { ActionList, bytes, clockTime, Dialog, Empty, ErrorBanner, HistoryList, Icon } from './ui.js'
 
 type Page = 'Dashboard' | 'Workloads' | 'Activity'
 type Filter = 'All' | 'Running' | 'Approved' | 'Installed'
@@ -34,6 +34,7 @@ export function App() {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [selection, setSelection] = useState<string | null>(null)
   const [preview, setPreview] = useState<SwitchPreview | null>(null)
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
   const [awaitingSwitch, setAwaitingSwitch] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
@@ -65,7 +66,9 @@ export function App() {
 
   const review = useCallback((target: ReviewTarget) => {
     void run(async () => {
-      setPreview(await window.devshift.review(target))
+      const next = await window.devshift.review(target)
+      setPreview(next)
+      setSkipped(new Set(next.items.filter(item => item.selected === false).map(item => item.id)))
       setOverlay('preview')
     })
   }, [run])
@@ -118,10 +121,18 @@ export function App() {
     setAwaitingSwitch(true)
     setOverlay('progress')
     void run(async () => {
-      const next = await window.devshift.execute(preview.token)
+      const next = await window.devshift.execute(preview.token, [...skipped])
       setAwaitingSwitch(false)
       setState(next)
       await load()
+    })
+  }
+  function toggleAction(id: string, selected: boolean) {
+    setSkipped(current => {
+      const next = new Set(current)
+      if (selected) next.delete(id)
+      else next.add(id)
+      return next
     })
   }
   function openDetails(row: Workload) { setSelection(row.id); setError(null) }
@@ -142,6 +153,8 @@ export function App() {
   const installed = data?.installed.filter(searchable) ?? []
   const selected = data?.workloads.find(row => row.id === selection)
   const canRecover = state?.hasSnapshot && ['RECOVERY_REQUIRED', 'PARTIAL_SUCCESS', 'FAILED'].includes(state.phase)
+  const chosen = preview?.items.filter(item => !skipped.has(item.id)) ?? []
+  const frees = chosen.reduce((total, item) => total + (item.memoryBytes ?? 0), 0)
 
   return (
     <div className="app-shell">
@@ -255,7 +268,9 @@ export function App() {
       {overlay === 'preview' && preview && <Dialog title={preview.keep ? 'Keep current state' : preview.recovery ? 'Review recovery'
         : preview.direction === 'gaming' ? 'Review Gaming Mode' : 'Review Development Mode'} onClose={dismiss} wide>
         <ErrorBanner error={error} />
-        {!preview.keep && <ActionList items={preview.items} showStatus={false} />}
+        {!preview.keep && preview.direction === 'gaming' && frees > 0 &&
+          <p className="preview-total">Frees about <strong>{bytes(frees)}</strong> of memory</p>}
+        {!preview.keep && <ActionList items={preview.items} showStatus={false} skipped={skipped} toggle={toggleAction} />}
         {preview.notices.length > 0 && <ul className="notice-list">{preview.notices.map((notice, index) => <li key={index}>{notice}</li>)}</ul>}
         <div className="dialog-footer"><button className="button" onClick={dismiss}>Cancel</button>
           <button className="button primary" onClick={confirm} disabled={disabled}>{preview.keep ? 'Keep current state'
@@ -268,7 +283,7 @@ export function App() {
         {preview && !preview.keep
           ? <SwitchTransition key={preview.token} direction={preview.direction} state={awaitingSwitch ? null : state} error={error} />
           : <p className="dialog-summary" aria-live="polite">{state?.summary}</p>}
-        <ActionList items={awaitingSwitch ? preview?.items ?? [] : state?.progress ?? []} showStatus />
+        <ActionList items={awaitingSwitch ? chosen : state?.progress ?? []} showStatus />
         <div className="dialog-footer"><button className="button primary" onClick={dismiss} disabled={disabled}>Done</button></div>
       </Dialog>}
 

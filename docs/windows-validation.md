@@ -57,3 +57,17 @@ A second check paired the packaged native sampler with Windows Performance Monit
 Before the one-second sampler was introduced, the redesigned desktop was sampled for 6.01 seconds with the dashboard visible and the test scan interval set to five seconds. Four persistent Electron processes used 488.0 MiB combined working set and 80 ms CPU time, about 0.060% normalized across 22 logical processors. Combined working sets can count shared pages more than once. The packaged desktop sample used 470.4 MiB combined working set and 18 ms CPU time over 6.01 seconds, about 0.014% of total logical CPU capacity. Both samples omit the transient .NET helper.
 
 The [dashboard capture](images/DevShift-dashboard.png) shows live values from the test host. Native caption controls are verified through the window controls overlay API and are rendered by Windows outside the web-contents capture.
+
+## Editors, dev servers, build servers, LocalDB, and power modes
+
+Checked on November 24, 2026, on the same host, running on battery with Energy Saver on. Every check used disposable targets.
+
+| Check | Result |
+| --- | --- |
+| Close by identity | The helper refused a close request with a wrong start time. With the correct identity, it posted WM_CLOSE to the target's one window, and the process exited. |
+| Ctrl+C | A dev server in a terminal that DevShift opened stopped after Ctrl+C. The terminal opened in the requested folder, and the scan read that folder back. |
+| Power mode | Both the plugged-in and battery settings switched to Best performance. A request with stale expectations was refused, and both settings were restored exactly. |
+| Preview | The Gaming preview found 227 MB of idle .NET build servers and the throwaway dev server. It kept VS Code out because DevShift was running from it. |
+| Desktop suite | The switching, recovery, and normal-exit test passed. The covered-window measurement timed out on this host on the original 0.1 code as well, so that failure predates this change. |
+
+Two Windows behaviors shaped the design. A terminal inherits the "ignore Ctrl+C" flag from the process that creates it, so the helper clears that flag before opening one. While Energy Saver is on, Windows reports its power-saving mode as the effective power mode, so DevShift reads and writes the stored plugged-in and battery settings instead.

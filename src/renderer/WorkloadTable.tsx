@@ -45,7 +45,9 @@ function WorkloadRow({ row, group, expanded, toggle, role, management, disabled,
             disabled={disabled} onChange={event => approve?.(row.id, event.target.checked)} />{row.approved ? 'Approved' : 'Approve'}</label>
           : row.kind === 'node' && row.canLaunch
             ? <button className="button button-compact" disabled={disabled} onClick={() => launch?.(row.id)}>Launch</button>
-            : <span className="muted">{row.approved ? 'Approved' : 'Observe only'}</span>}
+            : row.managed
+              ? <span className="managed-label" title={row.restoration}>Gaming Mode</span>
+              : <span className="muted">{row.approved ? 'Approved' : 'Observe only'}</span>}
       </td>}
     </tr>
   )

@@ -379,6 +379,13 @@ input::placeholder { color: #a0a5bd; }
 code { color: #d0c6ff; font-size: 11px; }
 .dialog .error-banner { margin-bottom: 10px; }
 .dialog .action-list, .dialog .empty { border: 1px solid var(--line); border-radius: 5px; background: #161824; }
+.action-select { display: flex; align-items: flex-start; gap: 9px; flex: 1; min-width: 0; cursor: pointer; }
+.action-select input { margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+.action-off strong, .action-off p, .action-off .action-memory { opacity: .5; }
+.action-memory { align-self: center; white-space: nowrap; color: var(--teal); font: 600 11px var(--mono); }
+.preview-total { margin: 0 0 9px; color: #c8c8dd; font-size: 12px; }
+.preview-total strong { color: var(--teal); font-weight: 650; }
+.managed-label { color: var(--accent); font-size: 11px; white-space: nowrap; }
 .notice-list { display: grid; gap: 5px; margin: 10px 0 0; padding-left: 17px; list-style: disc; color: #c9c9de; font-size: 12px; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; padding-top: 13px; }
 .form, .form label { display: grid; gap: 6px; min-width: 0; }

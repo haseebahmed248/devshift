@@ -64,14 +64,24 @@ export function OutcomeBadge({ status }: { status: OperationItem['status'] }) {
   return <span className={'status status-' + status}>{statusLabels[status]}</span>
 }
 
-export function ActionList({ items, showStatus }: { items: OperationItem[]; showStatus: boolean }) {
+export function ActionList({ items, showStatus, skipped, toggle }: {
+  items: OperationItem[]; showStatus: boolean; skipped?: ReadonlySet<string>; toggle?: (id: string, selected: boolean) => void
+}) {
   if (!items.length) return <Empty>No workload or power changes are planned.</Empty>
   return (
     <ul className="action-list">
-      {items.map(item => <li key={item.id}>
-        <div><strong>{item.label}</strong><p>{item.message || item.detail}</p></div>
-        {showStatus && <OutcomeBadge status={item.status} />}
-      </li>)}
+      {items.map(item => {
+        const text = <div><strong>{item.label}</strong><p>{item.message || item.detail}</p></div>
+        const off = !!toggle && !!skipped?.has(item.id)
+        return <li key={item.id} className={off ? 'action-off' : undefined}>
+          {toggle
+            ? <label className="action-select"><input type="checkbox" checked={!off}
+              onChange={event => toggle(item.id, event.target.checked)} />{text}</label>
+            : text}
+          {!!item.memoryBytes && <span className="action-memory" title="Estimated memory this frees">{bytes(item.memoryBytes)}</span>}
+          {showStatus && <OutcomeBadge status={item.status} />}
+        </li>
+      })}
     </ul>
   )
 }

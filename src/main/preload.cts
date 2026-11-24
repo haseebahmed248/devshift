@@ -4,7 +4,7 @@ import type { DevShiftApi } from '../shared/contracts.js'
 const api: DevShiftApi = {
   dashboard: refresh => ipcRenderer.invoke('devshift:dashboard', refresh),
   review: target => ipcRenderer.invoke('devshift:review', target),
-  execute: token => ipcRenderer.invoke('devshift:execute', token),
+  execute: (token, skip) => ipcRenderer.invoke('devshift:execute', token, skip),
   approve: (id, approved) => ipcRenderer.invoke('devshift:approve', id, approved),
   preferences: settings => ipcRenderer.invoke('devshift:preferences', settings),
   pickFile: kind => ipcRenderer.invoke('devshift:pick-file', kind),

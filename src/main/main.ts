@@ -6,9 +6,10 @@ import { pathToFileURL } from 'node:url'
 import { Engine } from '../core/engine.js'
 import { errorMessage, UserError } from '../core/model.js'
 import { Store } from '../core/store.js'
-import { channels } from '../shared/contracts.js'
+import { channels, gamingPowerModes } from '../shared/contracts.js'
 import type { ReviewTarget, Settings, SwitchState } from '../shared/contracts.js'
 import { createConfiguration, NodeRuntime } from './node-runtime.js'
+import type { Secrets } from './node-runtime.js'
 import { PerformanceMonitor } from './performance.js'
 import { Windows, WindowsHost } from './windows.js'
 
@@ -76,6 +77,7 @@ function refreshTray(state: SwitchState) {
 
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_$.:-]{1,120}$/.test(value)
 const uuid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value)
+const powerModeChoice = (value: unknown): value is string => typeof value === 'string' && gamingPowerModes.includes(value)
 const invalid = () => new UserError('DevShift rejected an invalid request.')
 
 function payload(value: unknown): Record<string, unknown> {
@@ -99,19 +101,21 @@ function registerIpc(controller: Engine, resetScanTimer: () => void) {
     if (target !== 'gaming' && target !== 'development' && target !== 'resume' && target !== 'keep') throw invalid()
     return controller.review(target)
   })
-  on(channels.execute, token => {
+  on(channels.execute, (token, skip) => {
     if (!uuid(token)) throw invalid()
-    return controller.execute(token)
+    if (skip !== undefined && (!Array.isArray(skip) || skip.length > 64 || skip.some(id => !validId(id)))) throw invalid()
+    return controller.execute(token, (skip as string[] | undefined) ?? [])
   })
   on(channels.approve, (id, approved) => {
     if (!validId(id) || !id.startsWith('service:') || typeof approved !== 'boolean') throw invalid()
     return controller.approve(id, approved)
   })
   on(channels.preferences, input => {
-    const { gamingPlan, scanInterval, minimizeToTray } = payload(input)
-    if ((gamingPlan !== null && !uuid(gamingPlan)) || typeof scanInterval !== 'number'
-      || ![5_000, 10_000, 30_000, 60_000].includes(scanInterval) || typeof minimizeToTray !== 'boolean') throw invalid()
-    return controller.preferences({ gamingPlan, scanInterval, minimizeToTray } satisfies Settings).then(resetScanTimer)
+    const { gamingPlan, gamingPowerMode, scanInterval, minimizeToTray } = payload(input)
+    if ((gamingPlan !== null && !uuid(gamingPlan)) || (gamingPowerMode !== null && !powerModeChoice(gamingPowerMode))
+      || typeof scanInterval !== 'number' || ![5_000, 10_000, 30_000, 60_000].includes(scanInterval)
+      || typeof minimizeToTray !== 'boolean') throw invalid()
+    return controller.preferences({ gamingPlan, gamingPowerMode, scanInterval, minimizeToTray } satisfies Settings).then(resetScanTimer)
   })
   on(channels.pickFile, async kind => {
     if (!window || (kind !== 'executable' && kind !== 'entry')) throw invalid()
@@ -171,14 +175,15 @@ async function start() {
 
   const helper = join(unpacked, 'dist', 'native', 'DevShift.Windows.exe')
   const windows = new Windows(helper)
-  const runtime = new NodeRuntime(windows, local, join(unpacked, 'runtime', 'shutdown.cjs'), {
+  const secrets: Secrets = {
     seal: async value => {
       if (!await safeStorage.isAsyncEncryptionAvailable()) throw new UserError('Windows credential encryption is unavailable.')
       return (await safeStorage.encryptStringAsync(value)).toString('base64')
     },
     unseal: async value => (await safeStorage.decryptStringAsync(Buffer.from(value, 'base64'))).result,
-  })
-  const controller = new Engine(local, new WindowsHost(windows, runtime, local), state => {
+  }
+  const runtime = new NodeRuntime(windows, local, join(unpacked, 'runtime', 'shutdown.cjs'), secrets)
+  const controller = new Engine(local, new WindowsHost(windows, runtime, local, secrets), state => {
     window?.webContents.send(channels.progress, state)
     refreshTray(state)
   })

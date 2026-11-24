@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { bestPerformanceMode, betterPerformanceMode } from '../shared/contracts.js'
 import type { Dashboard, FileChoice, Settings, Workload } from '../shared/contracts.js'
 import { Dialog, ErrorBanner } from './ui.js'
 
@@ -18,6 +19,13 @@ export function Preferences({ data, busy, error, close, save }: {
           {data.power.plans.map(plan => <option value={plan.id} key={plan.id}>{plan.name}</option>)}
         </select>
       </label>
+      {data.powerMode && <label>Gaming power mode
+        <select value={settings.gamingPowerMode ?? ''} onChange={event => setSettings({ ...settings, gamingPowerMode: event.target.value || null })}>
+          <option value="">Keep current mode</option>
+          <option value={betterPerformanceMode}>Better performance</option>
+          <option value={bestPerformanceMode}>Best performance</option>
+        </select>
+      </label>}
       <label>Workload scan interval
         <select value={settings.scanInterval} onChange={event => setSettings({ ...settings, scanInterval: Number(event.target.value) })}>
           {[5, 10, 30, 60].map(seconds => <option key={seconds} value={seconds * 1000}>{seconds} seconds</option>)}

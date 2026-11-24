@@ -1,4 +1,7 @@
-import type { Category, InstalledTool, Mode, OperationItem, Phase, PowerPlan, Settings, TimelineEntry, Workload } from '../shared/contracts.js'
+import { bestPerformanceMode } from '../shared/contracts.js'
+import type {
+  Category, InstalledTool, Mode, OperationItem, Phase, PowerModeState, PowerPlan, Settings, TimelineEntry, Workload,
+} from '../shared/contracts.js'
 
 export interface RawProcess {
   name: string
@@ -10,6 +13,7 @@ export interface RawProcess {
   privateMemoryBytes: number | null
   cpuTicks: number | null
   args: string[] | null
+  cwd?: string | null
 }
 
 export interface ServiceLink { name: string; state: string }
@@ -33,6 +37,7 @@ export interface WindowsScan {
   processes: RawProcess[]
   services: Service[]
   power: { active: string; plans: PowerPlan[] }
+  powerMode?: PowerModeState | null
   installed: InstalledTool[]
   build: number
 }
@@ -68,22 +73,55 @@ export interface Device {
   nodes: NodeObservation[]
   workloads: Workload[]
   scannedAt: string
+  /** Lets a switch skip the editor or terminal that DevShift itself runs in. */
+  selfPid?: number
 }
 
-export interface ChangeResult { changed: boolean }
+export type PowerModes = { ac: string; dc: string }
+
+/** PID, creation time, and path together survive PID reuse. */
+export type Identity = { pid: number; started: string; path: string }
+
+// Launch details can contain secrets, so they are only ever persisted DPAPI-sealed.
+export interface AppLaunch { executable: string; args: string[] }
+
+export interface DevServerLaunch { executable: string; args: string[]; cwd: string; title: string }
+
+export interface ChangeResult {
+  changed: boolean
+  /** The action ran but Windows didn't reach the requested state, for example an editor waiting on a save prompt. */
+  skipped?: boolean
+  message?: string
+}
 
 export interface Host {
   read: (includeInstalled?: boolean) => Promise<Device>
   changeService: (name: string, fingerprint: string, action: 'start' | 'stop', expectedPid: number) => Promise<ChangeResult>
   changePower: (expected: string, next: string) => Promise<ChangeResult>
+  changePowerMode: (expected: PowerModes, next: PowerModes) => Promise<ChangeResult>
   stopNode: (configuration: NodeWorkload, sessionId: string, process: RawProcess) => Promise<ChangeResult>
   startNode: (configuration: NodeWorkload, scan: WindowsScan) => Promise<ChangeResult>
+  closeApp: (identity: Identity) => Promise<ChangeResult>
+  openApp: (launch: AppLaunch) => Promise<ChangeResult>
+  stopDevServer: (identity: Identity) => Promise<ChangeResult>
+  startDevServer: (launch: DevServerLaunch) => Promise<ChangeResult>
+  stopBuildServers: (processes: Identity[]) => Promise<ChangeResult>
+  stopLocalDb: (processes: Identity[]) => Promise<ChangeResult>
+  seal: (value: string) => Promise<string>
+  unseal: (value: string) => Promise<string>
 }
 
 export type Captured =
   | { kind: 'power'; before: string; after: string }
+  | { kind: 'powermode'; before: PowerModes; after: string }
   | { kind: 'service'; name: string; fingerprint: string; pid: number; requires: string[]; dependents: string[] }
   | { kind: 'node'; configuration: NodeWorkload; sessionId: string; identity: Pick<RawProcess, 'pid' | 'started' | 'path'> }
+  | { kind: 'app'; label: string; identity: Identity; sealed?: string }
+  | { kind: 'devserver'; label: string; identity: Identity; sealed?: string }
+  | { kind: 'buildservers' }
+  | { kind: 'localdb' }
+
+export const capturedKinds: readonly Captured['kind'][] = ['power', 'powermode', 'service', 'node', 'app', 'devserver', 'buildservers', 'localdb']
 
 export interface Outcome {
   status: OperationItem['status']
@@ -94,6 +132,8 @@ export interface Outcome {
 
 export interface JournalStep {
   id: string
+  /** Remembers unticked actions across previews. Journals from 0.1 don't have it. */
+  key?: string
   label: string
   forward: string
   backward: string
@@ -118,7 +158,7 @@ export interface Cycle {
   summary: string
 }
 
-export const defaultSettings: Settings = { gamingPlan: null, scanInterval: 10_000, minimizeToTray: true }
+export const defaultSettings: Settings = { gamingPlan: null, gamingPowerMode: bestPerformanceMode, scanInterval: 10_000, minimizeToTray: true }
 export const nodeCategory: Category = 'Runtime'
 export const serviceKey = (name: string) => 'service:' + name.toLowerCase()
 export const pending = (): Outcome => ({ status: 'pending', message: '', effect: 'none', time: null })
@@ -138,4 +178,8 @@ export function errorMessage(error: unknown, fallback: string) {
 export function sameIdentity(left: Pick<RawProcess, 'pid' | 'started' | 'path'>, right: RawProcess) {
   return !!left.started && !!left.path && left.pid === right.pid && left.started === right.started
     && left.path.toLowerCase() === right.path?.toLowerCase()
+}
+
+export function identityOf(process: RawProcess): Identity | null {
+  return process.started && process.path ? { pid: process.pid, started: process.started, path: process.path } : null
 }

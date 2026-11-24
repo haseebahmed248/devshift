@@ -24,7 +24,7 @@
     "build": "npm run build:desktop && npm run build:native",
     "start": "npm run build && node scripts/start.mjs",
     "dev": "npm start",
-    "test": "tsc -p tsconfig.main.json && node --test tests/core.test.mjs",
+    "test": "tsc -p tsconfig.main.json && node --test tests/core.test.mjs tests/switch.test.mjs",
     "test:windows": "npm run build && node --test tests/windows.test.mjs",
     "test:windows:power": "npm run build && node --test tests/windows-power.test.mjs",
     "build:service-fixture": "dotnet publish tests/service-fixture/pg_ctl.csproj -c Release -r win-x64 --self-contained -o artifacts/service-fixture",

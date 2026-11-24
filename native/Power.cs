@@ -5,6 +5,68 @@ namespace DevShift.Windows;
 
 internal sealed record PowerPlan(Guid Id, string Name);
 internal sealed record PowerState(Guid Active, PowerPlan[] Plans);
+internal sealed record PowerModeState(Guid Ac, Guid Dc, bool PluggedIn, bool EnergySaver);
+
+// Windows keeps separate power mode settings for plugged in (AC) and battery (DC). These are the user settings,
+// not the mode Energy Saver forces while it is on.
+internal static class PowerMode
+{
+    internal static PowerModeState? Scan()
+    {
+        try
+        {
+            if (PowerGetUserConfiguredACPowerMode(out var ac) != 0 || PowerGetUserConfiguredDCPowerMode(out var dc) != 0) return null;
+            var known = GetSystemPowerStatus(out var status);
+            return new(ac, dc, known && status.AcLineStatus == 1, known && status.SystemStatusFlag == 1);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    internal static object Change(Guid expectedAc, Guid expectedDc, Guid nextAc, Guid nextDc)
+    {
+        var current = Scan() ?? throw new WindowsFault("power-mode-unavailable", "Windows power modes are unavailable on this PC.");
+        if (current.Ac == nextAc && current.Dc == nextDc) return new { changed = false };
+        if (current.Ac != expectedAc || current.Dc != expectedDc)
+            throw new WindowsFault("state-changed", "The power mode changed in Windows.");
+        if (current.Ac != nextAc) Check(PowerSetUserConfiguredACPowerMode(ref nextAc));
+        if (current.Dc != nextDc) Check(PowerSetUserConfiguredDCPowerMode(ref nextDc));
+        var updated = Scan();
+        if (updated is null || updated.Ac != nextAc || updated.Dc != nextDc)
+            throw new WindowsFault("verify-power-mode", "Windows did not report the requested power mode.");
+        return new { changed = true };
+    }
+
+    private static void Check(uint result)
+    {
+        if (result != 0) throw new WindowsFault("power-mode-apply", $"Windows could not change the power mode (error {result}).");
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte AcLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag;
+        public uint BatteryLifeTime, BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
+
+    [DllImport("powrprof.dll", ExactSpelling = true)]
+    private static extern uint PowerGetUserConfiguredACPowerMode(out Guid mode);
+
+    [DllImport("powrprof.dll", ExactSpelling = true)]
+    private static extern uint PowerGetUserConfiguredDCPowerMode(out Guid mode);
+
+    [DllImport("powrprof.dll", ExactSpelling = true)]
+    private static extern uint PowerSetUserConfiguredACPowerMode(ref Guid mode);
+
+    [DllImport("powrprof.dll", ExactSpelling = true)]
+    private static extern uint PowerSetUserConfiguredDCPowerMode(ref Guid mode);
+}
 
 internal static class Power
 {

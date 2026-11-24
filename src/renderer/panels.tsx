@@ -4,7 +4,7 @@ import logo from '../../assets/devshift.png'
 import type { Dashboard, ReviewTarget, SwitchState, Workload } from '../shared/contracts.js'
 import { bytes, clockTime, Empty, Icon, OutcomeBadge, percent, privateMemory } from './ui.js'
 
-import { performanceGapMs, performanceWindowMs, type PerformanceSample } from '../shared/contracts.js'
+import { performanceGapMs, performanceWindowMs, powerModeName, type PerformanceSample } from '../shared/contracts.js'
 
 export function ModeScene({ state }: { state: SwitchState }) {
   const gaming = state.mode === 'gaming'
@@ -155,6 +155,8 @@ export function SwitchControls({ data, state, disabled, review, preferences }: {
 }) {
   const active = data.power.plans.find(plan => plan.id === data.power.active)
   const preferred = data.power.plans.find(plan => plan.id === data.settings.gamingPlan)
+  const mode = data.powerMode
+  const gamingMode = data.settings.gamingPowerMode
   return (
     <>
       <section className="dock-section">
@@ -172,9 +174,14 @@ export function SwitchControls({ data, state, disabled, review, preferences }: {
         <p className="dock-note">{state.hasSnapshot ? 'Review restoration to reopen captured workloads.' : 'Choose Gaming to review the changes first.'}</p>
       </section>
       <section className="dock-section power-section">
-        <div className="dock-heading"><div className="dock-icon"><Icon type="power" /></div><h2>Power plan</h2></div>
-        <strong className="power-name">{active?.name ?? 'Unavailable'}</strong>
-        <dl className="power-settings"><div><dt>Gaming preference</dt><dd>{preferred?.name ?? (data.settings.gamingPlan ? 'Unavailable' : 'Keep current')}</dd></div></dl>
+        <div className="dock-heading"><div className="dock-icon"><Icon type="power" /></div><h2>Power</h2></div>
+        <strong className="power-name">{mode ? powerModeName(mode.pluggedIn ? mode.ac : mode.dc) : active?.name ?? 'Unavailable'}</strong>
+        <dl className="power-settings">
+          {mode && <div><dt>Gaming power mode</dt><dd>{gamingMode ? powerModeName(gamingMode) : 'Keep current'}</dd></div>}
+          {mode && <div><dt>Power plan</dt><dd>{active?.name ?? 'Unavailable'}</dd></div>}
+          <div><dt>Gaming power plan</dt><dd>{preferred?.name ?? (data.settings.gamingPlan ? 'Unavailable' : 'Keep current')}</dd></div>
+        </dl>
+        {mode?.energySaver && <p className="dock-note">Energy Saver is on, so Windows saves power until you plug in.</p>}
         <button className="text-button" onClick={preferences} disabled={disabled}>Power preferences<Icon type="arrow" /></button>
       </section>
     </>

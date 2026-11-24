@@ -19,32 +19,32 @@
   <img src="docs/images/DevShift-window.png" alt="DevShift in Development Mode, showing live CPU and memory charts, running workloads, and the mode switch" width="900">
 </p>
 
-Your dev stack doesn't need to keep running while you play. Database services, dev servers, and a balanced power plan compete with your game for CPU, memory, and power. DevShift shows you what's running, stops the workloads you approve when you switch to **Gaming Mode**, and restores them when you switch back to **Development Mode**.
+Your dev stack doesn't need to keep running while you play. Editors, dev servers, build servers, and databases hold gigabytes of memory, and a balanced power mode holds back your game. **Gaming Mode** closes and stops them, and **Development Mode** brings everything back the way it was.
 
 Every switch is previewed before anything changes and journaled to disk, so an interrupted switch can be resumed or closed the next time DevShift starts.
 
 > [!WARNING]
-> DevShift is an early alpha and manages a narrow set of workloads today. Expect rough edges.
+> DevShift is an early alpha. Expect rough edges.
 
 ## What it does today
 
-- **Live dashboard.** System-wide CPU and memory sampled every second, plus the development tools running right now: editors, runtimes, databases, Docker, WSL, emulators, and build tools.
+- **Editors.** Closes VS Code, Visual Studio, SQL Server Management Studio, and JetBrains IDEs as if you closed their windows, then reopens them when you switch back. VS Code keeps your unsaved files. If an editor asks you to save, DevShift leaves it open.
+- **Dev servers.** Stops commands such as `npm run dev`, `vite`, `next dev`, `dotnet watch`, or `manage.py runserver` with Ctrl+C, then runs each one again in a terminal window, in the same folder, when you return.
+- **Build servers and LocalDB.** Stops idle .NET build and compiler servers and SQL Server LocalDB. Both start again on their own when something needs them.
+- **Power.** Switches Windows 11 to the Best performance power mode while you play, and can also activate a gaming power plan. Both are restored afterward.
+- **A preview you control.** The preview shows what each action frees in memory. Untick anything you want to keep running, and DevShift remembers your choice next time.
 - **Database services.** Stops approved SQL Server, PostgreSQL, MySQL, MariaDB, MongoDB, Redis, and Memurai services in dependency order, and starts them again when you return. This needs start and stop permission on each service, which usually means running DevShift as administrator.
-- **Node projects.** Stops and relaunches Node projects that you launch through DevShift and that register a shutdown handler. See [Node projects](#node-projects).
-- **Power plans.** Optionally activates a gaming power plan and restores your original plan afterward.
 - **Crash-safe recovery.** If a switch is interrupted, DevShift offers to resume it, restore your setup, or keep the current state on its next start.
-- **Activity history, a tray menu, and a portable build.**
+- **Live dashboard, activity history, a tray menu, and a portable build.**
 
 ### Not yet
 
-DevShift shows these on the dashboard, but doesn't stop or restart them yet:
-
 - Docker Desktop and WSL
-- Editors and IDEs, such as VS Code and JetBrains IDEs
 - Android emulators
-- Dev servers started from a terminal, such as `npm run dev`, `vite`, or `next dev`
+- Controlling Windows services without running as administrator
+- Starting DevShift when Windows starts
 
-Windows 11 power modes, a way to control services without running as administrator, and start at sign-in are also planned. See the [roadmap](#roadmap).
+See the [roadmap](#roadmap).
 
 ## Install
 
@@ -68,17 +68,20 @@ To build a portable copy, run `npm.cmd run package:windows`, then open `out\DevS
 
 ## Use it
 
-1. Open **Workloads** and approve the services you want DevShift to manage.
-2. To manage a Node project, choose **Add Node workload**, select its `node.exe` and entry file, then **Launch** it. The project needs a [shutdown handler](#node-projects).
-3. Optionally, choose a gaming power plan in **Settings**.
-4. Choose **Gaming**, review what will stop and what stays running, and confirm.
-5. Choose **Development** to restore. **Activity** shows which actions succeeded, failed, or were skipped.
+1. Choose **Gaming**. The preview lists what DevShift will close or stop and how much memory each frees. Untick anything you want to keep, then confirm.
+2. When you're done playing, choose **Development**. DevShift reopens your editors, restarts your dev servers, and restores your power settings. **Activity** shows which actions succeeded, failed, or were skipped.
+
+Optional setup:
+
+- To include Windows database services, approve them in **Workloads**.
+- To change the gaming power mode or add a gaming power plan, open **Settings**.
+- For a Node project that needs a verified graceful shutdown, choose **Add Node workload**. See [Node projects](#node-projects).
 
 You can also switch from the tray icon. Press <kbd>F5</kbd> to refresh, <kbd>Ctrl</kbd>+<kbd>1</kbd> through <kbd>Ctrl</kbd>+<kbd>3</kbd> to change views, and <kbd>Ctrl</kbd>+<kbd>,</kbd> to open Settings.
 
 ## Node projects
 
-DevShift stops Node projects cooperatively. It asks the project to shut down over an authenticated local channel, and the project closes its own listeners and connections. Register the handler once the project is ready to serve requests:
+Dev servers you start from a terminal need no setup. For a project that must finish its own cleanup before stopping, register it with DevShift instead. DevShift then asks the project to shut down over an authenticated local channel, and the project closes its own listeners and connections. Register the handler once the project is ready to serve requests:
 
 ```javascript
 const http = require('node:http')
@@ -100,8 +103,9 @@ DevShift launches the entry file directly with Node and uses the file's folder a
 - **Preview first.** Nothing changes until you confirm the preview, and the preview expires if workloads change before you confirm.
 - **Journal before acting.** Each action is written to a local SQLite journal before DevShift touches Windows, so an interrupted switch can be recovered.
 - **Check identity every time.** Right before each action, DevShift matches processes by PID, start time, and path, and services by a fingerprint of their configuration.
-- **Respect your changes.** If you change a service or power plan while gaming, restoring leaves your change in place.
-- **No elevation, no telemetry.** DevShift never asks for administrator rights and sends nothing over the network. Raw command lines never reach the UI, journal, or history, and Node control keys are encrypted with Windows DPAPI.
+- **Never force.** Editors get the same close request as clicking their close buttons, dev servers get Ctrl+C, and only idle build servers are stopped. Anything that doesn't stop is left running.
+- **Respect your changes.** If you change a service, power plan, or power mode while gaming, or reopen an editor yourself, restoring leaves your change in place.
+- **No elevation, no telemetry.** DevShift never asks for administrator rights and sends nothing over the network. The commands it needs to restart editors and dev servers are stored only encrypted with Windows DPAPI, and labels in the UI and history never include command arguments.
 
 The journal lives in `%APPDATA%\DevShift`.
 
@@ -119,9 +123,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and pull request c
 
 ## Roadmap
 
-- Broader switching: Docker Desktop, WSL, editors, emulators, and dev servers started outside DevShift
+- Broader switching: Docker Desktop, WSL, and Android emulators
 - Lower resource use, especially while DevShift waits in the tray
-- Windows 11 power modes, and service control without running as administrator
+- Service control without running as administrator
 - Setup Studio, for installing and configuring development tools
 - Portable profiles that sync between your PCs, with an optional account. DevShift will never require an account.
 - Automatic rules, such as switching when a game starts

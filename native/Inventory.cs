@@ -7,12 +7,16 @@ using Microsoft.Win32;
 namespace DevShift.Windows;
 
 internal sealed record ProcessInfo(
-    string Name, int Pid, int ParentPid, string? Path, string? Started, ulong? MemoryBytes, ulong? PrivateMemoryBytes, long? CpuTicks, string[]? Args);
+    string Name, int Pid, int ParentPid, string? Path, string? Started, ulong? MemoryBytes, ulong? PrivateMemoryBytes, long? CpuTicks,
+    string[]? Args, string? Cwd);
 internal sealed record InstalledTool(string Name, string? Version, string Source);
 
 internal static partial class Inventory
 {
-    [GeneratedRegex(@"^(node|node64|python(?:w|\d+(?:\.\d+)?)?|dotnet|javaw?|devenv|code(?: - insiders)?|idea64|webstorm64|pycharm64|rider64|clion64|goland64|phpstorm64|rubymine64|datagrip64|rustrover64|studio64|fleet|sqlservr|postgres|pg_ctl|mysqld|mariadbd|mongod|redis-server|memurai|docker desktop|com\.docker\.backend|docker|wsl|wslhost|wslservice|vmmemwsl|msbuild|cmake|ninja|gradle|mvn|tsc|adb|emulator|qemu-system-.+|iisexpress|mspdbsrv|vbcscompiler)\.exe$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(node|node64|python(?:w|\d+(?:\.\d+)?)?|dotnet|javaw?|deno|bun)\.exe$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RuntimeExecutable();
+
+    [GeneratedRegex(@"^(node|node64|python(?:w|\d+(?:\.\d+)?)?|dotnet|javaw?|deno|bun|devenv|ssms|code(?: - insiders)?|idea64|webstorm64|pycharm64|rider64|clion64|goland64|phpstorm64|rubymine64|datagrip64|rustrover64|studio64|fleet|sqlservr|postgres|pg_ctl|mysqld|mariadbd|mongod|redis-server|memurai|docker desktop|com\.docker\.backend|docker|wsl|wslhost|wslservice|vmmemwsl|msbuild|cmake|ninja|gradle|mvn|tsc|adb|emulator|qemu-system-.+|iisexpress|mspdbsrv|vbcscompiler)\.exe$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     internal static partial Regex DevelopmentExecutable();
 
     [GeneratedRegex(@"^(?:Microsoft\s+)?(?:Visual Studio (?:Code|Community|Professional|Enterprise|Build Tools)|JetBrains Toolbox|IntelliJ IDEA|WebStorm|PyCharm|Rider|CLion|GoLand|PhpStorm|RubyMine|DataGrip|RustRover|Android Studio|Node\.js|Python \d|\.NET SDK|OpenJDK|Java (?:SE|Development)|Eclipse Temurin|Microsoft SQL Server|SQL Server (?:\d|Management)|PostgreSQL|MySQL|MariaDB|MongoDB|Redis|Memurai|Docker Desktop|Windows Subsystem for Linux|CMake|Ninja|Git)(?:\b|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -58,9 +62,12 @@ internal static partial class Inventory
             {
                 var name = (string?)row["Name"] ?? "";
                 var pid = Convert.ToInt32(row["ProcessId"]);
+                // Memory is read for every process so an editor's helper processes count toward its total.
+                var workingSet = row["WorkingSetSize"] as ulong?;
+                ulong? privateBytes = privateMemory.TryGetValue(pid, out var bytes) ? bytes : null;
                 if (!DevelopmentExecutable().IsMatch(name))
                 {
-                    result.Add(new(name, pid, Convert.ToInt32(row["ParentProcessId"]), null, Creation(row), null, null, null, null));
+                    result.Add(new(name, pid, Convert.ToInt32(row["ParentProcessId"]), null, Creation(row), workingSet, privateBytes, null, null, null));
                     continue;
                 }
 
@@ -76,9 +83,9 @@ internal static partial class Inventory
 
                 result.Add(new(
                     name, pid, Convert.ToInt32(row["ParentProcessId"]),
-                    row["ExecutablePath"] as string, Creation(row), row["WorkingSetSize"] as ulong?,
-                    privateMemory.TryGetValue(pid, out var bytes) ? bytes : null, cpu,
-                    Arguments(row["CommandLine"] as string)));
+                    row["ExecutablePath"] as string, Creation(row), workingSet, privateBytes, cpu,
+                    Arguments(row["CommandLine"] as string),
+                    RuntimeExecutable().IsMatch(name) ? Control.CurrentDirectory(pid) : null));
             }
         }
 

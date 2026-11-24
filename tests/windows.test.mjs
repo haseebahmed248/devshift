@@ -124,6 +124,24 @@ async function click(ui, name, scope = 'body') {
   assert.ok(selected)
 }
 
+// The Gaming preview also lists the tester's real editors, dev servers, and power mode. Untick everything except
+// the test's own workload, so a test run never closes or stops anything on the machine.
+async function keepOnly(ui, label) {
+  const ticked = await until(() => ui.evaluate(name => {
+    const rows = [...(document.querySelector('dialog')?.querySelectorAll('.action-list li') ?? [])]
+    if (!rows.length && !document.querySelector('dialog .empty')) return null
+    if (name && !rows.some(row => row.textContent.includes(name))) return null
+    for (const row of rows) {
+      const box = row.querySelector('input[type=checkbox]')
+      const keep = !!name && row.textContent.includes(name)
+      if (box && box.checked !== keep) box.click()
+    }
+    return rows.filter(row => row.querySelector('input[type=checkbox]')?.checked).map(row => row.textContent)
+  }, label), result => Array.isArray(result) && result.length === (label ? 1 : 0) && result.every(text => text.includes(label)),
+  'Keep only ' + (label ?? 'nothing') + ' ticked')
+  assert.equal(ticked.length, label ? 1 : 0)
+}
+
 function rendered(ui, text) {
   return until(() => ui.evaluate(needle => ({ found: document.body.innerText.includes(needle), view: document.body.innerText.slice(0, 400) }), text),
     value => value.found, 'Text ' + text)
@@ -159,7 +177,12 @@ async function exitWindow(instance) {
 }
 
 async function captureSwitch(ui, direction, animation) {
-  await until(() => ui.evaluate(name => window.switchAnimations.includes(name), animation), Boolean, direction + ' logo animation')
+  try {
+    await until(() => ui.evaluate(name => window.switchAnimations.includes(name), animation), Boolean, direction + ' logo animation')
+  } catch (error) {
+    const dialog = await ui.evaluate(() => document.querySelector('dialog[open]')?.innerText ?? 'No dialog is open.')
+    throw new Error(error.message + '\nOpen dialog:\n' + dialog)
+  }
   const clip = await ui.evaluate(async target => {
     const scene = document.querySelector('dialog[open] .switch-' + target)
     if (!scene || !scene.querySelector('.switch-mark')?.naturalWidth) throw new Error('Missing switch logo')
@@ -341,6 +364,7 @@ test('desktop shows a startup splash, respects motion preferences, and expands a
     await click(ui, 'Dashboard')
     await click(ui, 'Gaming')
     assert.equal(await ui.evaluate(() => document.querySelector('.switch-scene') === null), true)
+    await keepOnly(ui, null)
     await click(ui, 'Confirm switch', 'dialog')
     await rendered(ui, 'Gaming Mode is active.')
     assert.equal(await ui.evaluate(() => getComputedStyle(document.querySelector('.boost-mark')).animationName), 'none')
@@ -545,6 +569,7 @@ test('Windows desktop switches a real cooperative server, leaves an unrelated pr
     assert.equal(await http(first), first.pid)
 
     await click(ui, 'Gaming')
+    await keepOnly(ui, 'Controlled Node server')
     await click(ui, 'Confirm switch', 'dialog')
     await captureSwitch(ui, 'gaming', 'boost-launch')
     await rendered(ui, 'Gaming Mode is active. Windows state was verified.')
@@ -561,6 +586,7 @@ test('Windows desktop switches a real cooperative server, leaves an unrelated pr
     assert.equal(await http(second), second.pid)
 
     await click(ui, 'Gaming')
+    await keepOnly(ui, 'Controlled Node server')
     await click(ui, 'Confirm switch', 'dialog')
     await until(() => readFile(join(managed.folder, 'shutdown.requested'), 'utf8'), value => Number(value) === second.pid, 'Durable stop intent')
     assert.ok(instance.child.kill(), 'Stop only the isolated DevShift test instance')

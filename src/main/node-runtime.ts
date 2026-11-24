@@ -11,7 +11,7 @@ import type { NodeObservation, NodeSession, NodeWorkload, RawProcess, WindowsSca
 import type { Store } from '../core/store.js'
 import type { Windows } from './windows.js'
 
-interface Secrets {
+export interface Secrets {
   seal: (value: string) => Promise<string>
   unseal: (value: string) => Promise<string>
 }

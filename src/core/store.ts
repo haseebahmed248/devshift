@@ -1,6 +1,6 @@
 import * as sqlite from 'node:sqlite'
 import type { Settings } from '../shared/contracts.js'
-import { defaultSettings, UserError } from './model.js'
+import { capturedKinds, defaultSettings, UserError } from './model.js'
 import type { Cycle, NodeSession, NodeWorkload } from './model.js'
 
 const { Database = sqlite.DatabaseSync } = sqlite as typeof sqlite & { Database?: typeof sqlite.DatabaseSync }
@@ -27,8 +27,15 @@ export class Store {
       .run(key, JSON.stringify(value))
   }
 
-  get settings() { return this.read('settings', defaultSettings) }
+  // Fills in options added after the settings were saved.
+  get settings(): Settings { return { ...defaultSettings, ...this.read<Partial<Settings>>('settings', {}) } }
   set settings(value: Settings) { this.write('settings', value) }
+
+  get skips() {
+    const value = this.read<unknown>('gaming-skips', [])
+    return Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string') : []
+  }
+  set skips(value: string[]) { this.write('gaming-skips', value) }
 
   get approvals() { return this.read<Record<string, string>>('approved-services', {}) }
 
@@ -92,7 +99,7 @@ function parseCycle(value: string): Cycle {
 
   for (const step of cycle.steps) {
     if (typeof step.id !== 'string' || !step.gaming || !step.development
-      || !['node', 'service', 'power'].includes(step.captured?.kind)) {
+      || !capturedKinds.includes(step.captured?.kind)) {
       throw new UserError('The recovery snapshot contains an invalid action.')
     }
   }

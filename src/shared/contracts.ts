@@ -29,12 +29,36 @@ export interface Workload {
   canApprove: boolean
   canLaunch: boolean
   canRemove: boolean
+  /** Handled by Gaming Mode without an approval step. */
+  managed?: boolean
   restoration: string
   detail: string
 }
 
+/** Windows 11 power modes. Balanced is the empty GUID. */
+export const powerModes = [
+  { id: '961cc777-2547-4f9d-8174-7d86181b8a7a', name: 'Best power efficiency' },
+  { id: '00000000-0000-0000-0000-000000000000', name: 'Balanced' },
+  { id: '3af9b8d9-7c97-431d-ad78-34a8bfea439f', name: 'Better performance' },
+  { id: 'ded574b5-45a0-4f42-8737-46345c09c238', name: 'Best performance' },
+] as const
+export const betterPerformanceMode = '3af9b8d9-7c97-431d-ad78-34a8bfea439f'
+export const bestPerformanceMode = 'ded574b5-45a0-4f42-8737-46345c09c238'
+export const gamingPowerModes: readonly string[] = [betterPerformanceMode, bestPerformanceMode]
+export const powerModeName = (id: string | null | undefined) =>
+  powerModes.find(mode => mode.id === id)?.name ?? (id ? 'Custom power mode' : 'Unavailable')
+
+export interface PowerModeState {
+  ac: string
+  dc: string
+  pluggedIn: boolean
+  /** While Energy Saver is on, Windows uses its power-saving mode whatever these settings say. */
+  energySaver: boolean
+}
+
 export interface Settings {
   gamingPlan: string | null
+  gamingPowerMode: string | null
   scanInterval: number
   minimizeToTray: boolean
 }
@@ -45,6 +69,8 @@ export interface OperationItem {
   detail: string
   status: StepStatus
   message: string
+  memoryBytes?: number | null
+  selected?: boolean
 }
 
 export interface TimelineEntry {
@@ -84,6 +110,7 @@ export interface Dashboard {
   settings: Settings
   history: TimelineEntry[]
   power: { active: string | null; plans: PowerPlan[] }
+  powerMode: PowerModeState | null
   build: number
   scannedAt: string
 }
@@ -108,7 +135,7 @@ export interface NodeRegistration {
 export interface DevShiftApi {
   dashboard: (refresh?: boolean) => Promise<Dashboard>
   review: (target: ReviewTarget) => Promise<SwitchPreview>
-  execute: (token: string) => Promise<SwitchState>
+  execute: (token: string, skip?: string[]) => Promise<SwitchState>
   approve: (id: string, approved: boolean) => Promise<void>
   preferences: (settings: Settings) => Promise<void>
   pickFile: (kind: 'executable' | 'entry') => Promise<FileChoice | null>
