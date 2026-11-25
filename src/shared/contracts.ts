@@ -61,6 +61,7 @@ export interface Settings {
   gamingPowerMode: string | null
   scanInterval: number
   minimizeToTray: boolean
+  startAtLogin: boolean
 }
 
 export interface OperationItem {

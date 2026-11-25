@@ -33,6 +33,8 @@ export function Preferences({ data, busy, error, close, save }: {
       </label>
       <label className="inline-field"><input type="checkbox" checked={settings.minimizeToTray}
         onChange={event => setSettings({ ...settings, minimizeToTray: event.target.checked })} />Keep DevShift in the tray when I close the window</label>
+      <label className="inline-field"><input type="checkbox" checked={settings.startAtLogin}
+        onChange={event => setSettings({ ...settings, startAtLogin: event.target.checked })} />Start DevShift when Windows starts</label>
       <div className="dialog-footer"><button type="button" className="button" onClick={close} disabled={busy}>Cancel</button>
         <button className="button primary" disabled={busy}>Save settings</button></div>
     </form>

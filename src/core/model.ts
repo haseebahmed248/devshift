@@ -158,7 +158,7 @@ export interface Cycle {
   summary: string
 }
 
-export const defaultSettings: Settings = { gamingPlan: null, gamingPowerMode: bestPerformanceMode, scanInterval: 10_000, minimizeToTray: true }
+export const defaultSettings: Settings = { gamingPlan: null, gamingPowerMode: bestPerformanceMode, scanInterval: 10_000, minimizeToTray: true, startAtLogin: false }
 export const nodeCategory: Category = 'Runtime'
 export const serviceKey = (name: string) => 'service:' + name.toLowerCase()
 export const pending = (): Outcome => ({ status: 'pending', message: '', effect: 'none', time: null })

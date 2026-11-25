@@ -4,6 +4,10 @@ Notable changes to DevShift are listed here. The format follows [Keep a Changelo
 
 ## Unreleased
 
+### Added
+
+- Setting to start DevShift automatically when Windows starts, minimized directly to the tray.
+
 ## 0.1.0 - 2026-11-24
 
 First public version.

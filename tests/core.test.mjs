@@ -267,3 +267,10 @@ test('serializes transitions and preserves external changes when closing recover
   assert.equal(store.active(), null)
   assert.equal(calls.length, before)
 })
+
+test('saves the start at login setting', context => {
+  const { store } = setup(context)
+  assert.equal(store.settings.startAtLogin, false)
+  store.settings = { ...store.settings, startAtLogin: true }
+  assert.equal(store.settings.startAtLogin, true)
+})
