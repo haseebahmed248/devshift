@@ -29,6 +29,7 @@
     "test:windows:power": "npm run build && node --test tests/windows-power.test.mjs",
     "build:service-fixture": "dotnet publish tests/service-fixture/pg_ctl.csproj -c Release -r win-x64 --self-contained -o artifacts/service-fixture",
     "test:windows:service": "npm run build && npm run build:service-fixture && node --test tests/windows-service.test.mjs",
+    "measure:actions": "npm run build:native && node scripts/measure-actions.mjs",
     "package:windows": "npm run build && node scripts/package.mjs"
   },
   "devDependencies": {

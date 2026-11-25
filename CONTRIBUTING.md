@@ -62,6 +62,10 @@ Run the tests that match your change before opening a pull request:
 
 The desktop tests use a disposable profile and loopback Node servers, and they don't touch your services. The power test switches to a temporary copy of your current plan, restores the original, and deletes the copy. The service test creates two temporary services and removes them afterward.
 
+### Measure on your PC
+
+Gaming Mode's defaults depend on numbers from many different PCs. `npm.cmd run measure:actions` measures how much throttling and pausing background apps helps on yours, using only processes it starts. Add `-- --low-memory` to also simulate a PC that's short on memory; other apps may respond slowly for a moment afterwards. Post the output on [#11](https://github.com/haseebahmed248/devshift/issues/11).
+
 ## Pull requests
 
 - Keep each pull request focused on one change.

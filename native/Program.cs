@@ -29,6 +29,12 @@ internal static partial class Program
     private static bool ProcessArguments(string pid, string started, out int id) =>
         int.TryParse(pid, out id) && id > 0 && StartTime().IsMatch(started);
 
+    // Realtime is never accepted, because it can starve Windows itself.
+    private static bool PriorityClass(string value, out uint priority) =>
+        uint.TryParse(value, out priority) && priority is 0x20 or 0x40 or 0x80 or 0x4000 or 0x8000;
+
+    private static bool ThrottleMask(string value, out uint mask) => uint.TryParse(value, out mask) && (mask & ~0x5u) == 0;
+
     static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
@@ -74,6 +80,18 @@ internal static partial class Program
                 ["terminate", var pid, var started] when ProcessArguments(pid, started, out var target)
                     => Control.Terminate(target, started),
                 ["launch-console", var payload] when Base64().IsMatch(payload) => Control.LaunchConsole(payload, Json),
+                ["throttle", var pid, var started] when ProcessArguments(pid, started, out var target)
+                    => Control.Throttle(target, started),
+                ["unthrottle", var pid, var started, var priority, var control, var state]
+                    when ProcessArguments(pid, started, out var target) && PriorityClass(priority, out var priorityClass)
+                    && ThrottleMask(control, out var controlMask) && ThrottleMask(state, out var stateMask) && (stateMask & ~controlMask) == 0
+                    => Control.Unthrottle(target, started, priorityClass, controlMask, stateMask),
+                ["pause", var pid, var started] when ProcessArguments(pid, started, out var target)
+                    => Control.Pause(target, started),
+                ["resume", var pid, var started] when ProcessArguments(pid, started, out var target)
+                    => Control.Resume(target, started),
+                ["machine"] => Machine.Describe(),
+                ["processor-times"] => Machine.ProcessorTimes(),
                 _ => throw new WindowsFault("invalid-request", "Windows helper rejected the request.")
             };
             Console.WriteLine(JsonSerializer.Serialize(new { ok = true, value }, Json));

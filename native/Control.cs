@@ -14,6 +14,12 @@ internal static partial class Control
     private const uint QueryLimited = 0x1000;
     private const uint VmRead = 0x0010;
     private const uint TerminateAccess = 0x0001;
+    private const uint SetQuota = 0x0100;
+    private const uint SetInformation = 0x0200;
+    private const uint SuspendResume = 0x0800;
+    private const int ProcessPowerThrottling = 4;
+    private const uint ThrottleExecutionSpeed = 0x1;
+    private const uint IdlePriority = 0x40;
     private const uint WmClose = 0x0010;
     private const uint GwOwner = 4;
     private const uint CreateNewConsole = 0x0010;
@@ -84,6 +90,57 @@ internal static partial class Control
         if (!TerminateProcess(process, 1))
             throw new WindowsFault("process-access", "Windows denied DevShift permission to stop the process.");
         return new { changed = true };
+    }
+
+    // Efficiency mode as Task Manager applies it: EcoQoS plus idle priority. The reply carries the previous state for restoring.
+    internal static object Throttle(int pid, string started)
+    {
+        using var process = Open(pid, started, SetInformation);
+        var priority = GetPriorityClass(process);
+        if (priority == 0) throw new WindowsFault("process-access", "Windows did not let DevShift read the process priority.");
+        var previous = new PowerThrottlingState { Version = 1 };
+        var known = GetProcessInformation(process, ProcessPowerThrottling, ref previous, Marshal.SizeOf<PowerThrottlingState>());
+        var state = new PowerThrottlingState { Version = 1, ControlMask = ThrottleExecutionSpeed, StateMask = ThrottleExecutionSpeed };
+        if (!SetProcessInformation(process, ProcessPowerThrottling, ref state, Marshal.SizeOf<PowerThrottlingState>())
+            || !SetPriorityClass(process, IdlePriority))
+            throw new WindowsFault("process-access", "Windows denied DevShift permission to throttle the process.");
+        return new { changed = true, priority, controlMask = known ? previous.ControlMask : 0, stateMask = known ? previous.StateMask : 0 };
+    }
+
+    internal static object Unthrottle(int pid, string started, uint priority, uint controlMask, uint stateMask)
+    {
+        using var process = Open(pid, started, SetInformation);
+        var state = new PowerThrottlingState { Version = 1, ControlMask = controlMask, StateMask = stateMask };
+        if (!SetProcessInformation(process, ProcessPowerThrottling, ref state, Marshal.SizeOf<PowerThrottlingState>())
+            || !SetPriorityClass(process, priority))
+            throw new WindowsFault("process-access", "Windows denied DevShift permission to restore the process.");
+        return new { changed = true };
+    }
+
+    // NtSuspendProcess is undocumented, but Resource Monitor and Process Explorer rely on it. Suspends nest, so each pause needs one resume.
+    internal static object Pause(int pid, string started)
+    {
+        using var process = Open(pid, started, SuspendResume | SetQuota);
+        var before = WorkingSet(process);
+        if (NtSuspendProcess(process) != 0)
+            throw new WindowsFault("process-access", "Windows denied DevShift permission to pause the process.");
+        // Trimming after suspending means the app can't fault its pages straight back in.
+        SetProcessWorkingSetSizeEx(process, nuint.MaxValue, nuint.MaxValue, 0);
+        return new { changed = true, workingSetBefore = before, workingSetAfter = WorkingSet(process) };
+    }
+
+    internal static object Resume(int pid, string started)
+    {
+        using var process = Open(pid, started, SuspendResume);
+        if (NtResumeProcess(process) != 0)
+            throw new WindowsFault("process-access", "Windows denied DevShift permission to resume the process.");
+        return new { changed = true };
+    }
+
+    private static ulong? WorkingSet(SafeProcessHandle process)
+    {
+        var counters = new MemoryCounters { Size = (uint)Marshal.SizeOf<MemoryCounters>() };
+        return K32GetProcessMemoryInfo(process, ref counters, counters.Size) ? counters.WorkingSetSize : null;
     }
 
     // cmd /k keeps the window open after the command exits, so its output stays visible.
@@ -177,6 +234,49 @@ internal static partial class Control
     {
         public nint ExitStatus, PebBaseAddress, AffinityMask, BasePriority, UniqueProcessId, InheritedFromUniqueProcessId;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PowerThrottlingState
+    {
+        public uint Version, ControlMask, StateMask;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryCounters
+    {
+        public uint Size, PageFaultCount;
+        public nuint PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,
+            QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage;
+    }
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern uint GetPriorityClass(SafeProcessHandle process);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetPriorityClass(SafeProcessHandle process, uint priority);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessInformation(SafeProcessHandle process, int informationClass, ref PowerThrottlingState information, int size);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessInformation(SafeProcessHandle process, int informationClass, ref PowerThrottlingState information, int size);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessWorkingSetSizeEx(SafeProcessHandle process, nuint minimum, nuint maximum, uint flags);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool K32GetProcessMemoryInfo(SafeProcessHandle process, ref MemoryCounters counters, uint size);
+
+    [DllImport("ntdll.dll", ExactSpelling = true)]
+    private static extern int NtSuspendProcess(SafeProcessHandle process);
+
+    [DllImport("ntdll.dll", ExactSpelling = true)]
+    private static extern int NtResumeProcess(SafeProcessHandle process);
 
     [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
     private static extern SafeProcessHandle OpenProcess(uint access, bool inherit, int pid);
