@@ -573,6 +573,7 @@ test('Windows desktop switches a real cooperative server, leaves an unrelated pr
     await click(ui, 'Confirm switch', 'dialog')
     await captureSwitch(ui, 'gaming', 'boost-launch')
     await rendered(ui, 'Gaming Mode is active. Windows state was verified.')
+    assert.equal(await ui.evaluate(() => document.querySelector('dialog[open] [role="status"]')?.textContent), '1 of 1 actions finished')
     await assert.rejects(http(first))
     assert.equal(await helper.process(first.pid), null)
     assert.equal(await http(peer), peer.pid)

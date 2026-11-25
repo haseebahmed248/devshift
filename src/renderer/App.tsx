@@ -115,7 +115,13 @@ export function App() {
     return () => window.removeEventListener('keydown', keydown)
   }, [overlay, disabled, refreshing, data, go, preferences, refresh])
 
-  function dismiss() { setOverlay(null); setError(null) }
+  function dismiss() {
+    const afterSwitch = overlay === 'progress'
+    setOverlay(null)
+    setError(null)
+    // The mode button that started the switch is now disabled, so focus would otherwise fall back to the page.
+    if (afterSwitch) requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.mode-switch button:not(:disabled)')?.focus())
+  }
   function confirm() {
     if (!preview) return
     setAwaitingSwitch(true)
@@ -155,6 +161,8 @@ export function App() {
   const canRecover = state?.hasSnapshot && ['RECOVERY_REQUIRED', 'PARTIAL_SUCCESS', 'FAILED'].includes(state.phase)
   const chosen = preview?.items.filter(item => !skipped.has(item.id)) ?? []
   const frees = chosen.reduce((total, item) => total + (item.memoryBytes ?? 0), 0)
+  const actions = (state?.progress ?? []).filter(item => !item.id.startsWith('blocked:'))
+  const finished = actions.filter(item => item.status !== 'pending' && item.status !== 'running').length
 
   return (
     <div className="app-shell">
@@ -173,7 +181,7 @@ export function App() {
             </button>)}
           </nav>
           <div className="rail-end">
-            <button className="rail-item" aria-label="Preferences" title="Preferences (Ctrl+,)" disabled={!data || disabled}
+            <button className="rail-item" aria-label="Settings" title="Settings (Ctrl+,)" disabled={!data || disabled}
               onClick={preferences}><span className="rail-glyph"><Icon type="settings" /></span><span>Settings</span></button>
             <button className="rail-item quit-button" aria-label="Quit DevShift" title="Quit DevShift" disabled={disabled}
               onClick={() => { void run(() => window.devshift.quit()) }}><span className="rail-glyph"><Icon type="exit" /></span><span>Quit</span></button>
@@ -284,6 +292,7 @@ export function App() {
           ? <SwitchTransition key={preview.token} direction={preview.direction} state={awaitingSwitch ? null : state} error={error} />
           : <p className="dialog-summary" aria-live="polite">{state?.summary}</p>}
         <ActionList items={awaitingSwitch ? chosen : state?.progress ?? []} showStatus />
+        {!awaitingSwitch && actions.length > 0 && <p className="sr-only" role="status">{finished} of {actions.length} actions finished</p>}
         <div className="dialog-footer"><button className="button primary" onClick={dismiss} disabled={disabled}>Done</button></div>
       </Dialog>}
 

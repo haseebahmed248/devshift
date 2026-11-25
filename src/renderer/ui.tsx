@@ -78,7 +78,8 @@ export function ActionList({ items, showStatus, skipped, toggle }: {
             ? <label className="action-select"><input type="checkbox" checked={!off}
               onChange={event => toggle(item.id, event.target.checked)} />{text}</label>
             : text}
-          {!!item.memoryBytes && <span className="action-memory" title="Estimated memory this frees">{bytes(item.memoryBytes)}</span>}
+          {!!item.memoryBytes && <span className="action-memory" title="Estimated memory this frees">
+            <span className="sr-only">Frees about </span>{bytes(item.memoryBytes)}</span>}
           {showStatus && <OutcomeBadge status={item.status} />}
         </li>
       })}

@@ -32,6 +32,9 @@ export function Performance() {
   const total = current?.totalMemory ?? null
   const utilization = used !== null && total !== null ? Math.round(100 * used / total) : null
   const cpuStatus = !current || (samples.length === 1 && total !== null) ? 'Sampling' : 'Unavailable'
+  const cpuTrend = trend(samples, sample => sample.cpu)
+  const memoryTrend = trend(samples, sample => sample.usedMemory !== null && sample.totalMemory
+    ? 100 * sample.usedMemory / sample.totalMemory : null)
   return (
     <section className="telemetry" aria-label="System performance">
       <div className="pane-title"><h2>System performance</h2><span className="micro">1 s refresh · 60 s history</span></div>
@@ -40,6 +43,7 @@ export function Performance() {
           <div className="readout-label"><span className="metric-dot cpu-dot" /><h3>CPU usage</h3></div>
           <div className="readout-value">{cpu === null ? '—' : Math.round(cpu) + '%'}<span>{cpu === null ? cpuStatus : 'System total'}</span></div>
           {cpu !== null && <span className="sr-only" role="meter" aria-label="CPU usage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(cpu)} />}
+          {cpuTrend && <p className="sr-only">{cpuTrend}</p>}
           <Trace values={samples} field="cpu" />
         </div>
         <div className="readout">
@@ -47,11 +51,20 @@ export function Performance() {
           <div className="readout-value">{bytes(used, 'gb')}<span>{total === null ? (current ? 'Unavailable' : 'Sampling')
             : 'of ' + bytes(total, 'gb') + ' (' + utilization + '%)'}</span></div>
           {utilization !== null && <span className="sr-only" role="meter" aria-label="Memory used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={utilization} />}
+          {memoryTrend && <p className="sr-only">{memoryTrend}</p>}
           <Trace values={samples} field="memory" />
         </div>
       </div>
     </section>
   )
+}
+
+// The charts are drawn on a canvas, so screen readers get the same minute as text instead.
+function trend(samples: PerformanceSample[], read: (sample: PerformanceSample) => number | null) {
+  const values = samples.map(read).filter((value): value is number => value !== null)
+  if (values.length < 2) return null
+  const average = Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+  return `Last minute: average ${average}%, peak ${Math.round(Math.max(...values))}%.`
 }
 
 function Trace({ values, field }: { values: PerformanceSample[]; field: 'cpu' | 'memory' }) {
@@ -182,7 +195,7 @@ export function SwitchControls({ data, state, disabled, review, preferences }: {
           <div><dt>Gaming power plan</dt><dd>{preferred?.name ?? (data.settings.gamingPlan ? 'Unavailable' : 'Keep current')}</dd></div>
         </dl>
         {mode?.energySaver && <p className="dock-note">Energy Saver is on, so Windows saves power until you plug in.</p>}
-        <button className="text-button" onClick={preferences} disabled={disabled}>Power preferences<Icon type="arrow" /></button>
+        <button className="text-button" onClick={preferences} disabled={disabled}>Power settings<Icon type="arrow" /></button>
       </section>
     </>
   )
